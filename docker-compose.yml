@@ -1,0 +1,81 @@
+# Development-oriented Compose stack: PostgreSQL + the API.
+#
+# SECRET_KEY defaults to a clearly-marked development value so `docker compose
+# up` works out of the box. ALWAYS override it before exposing the stack to any
+# network you do not control.
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-enterprise}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-enterprise}
+      POSTGRES_DB: ${POSTGRES_DB:-enterprise_api}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_NAME: ${APP_NAME:-Enterprise API}
+      APP_VERSION: ${APP_VERSION:-1.0.0}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      DEBUG: "false"
+      DOCS_ENABLED: ${DOCS_ENABLED:-true}
+      SECRET_KEY: ${SECRET_KEY:-dev-only-compose-secret-key-change-me-0123456789}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-7}
+      BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-enterprise}:${POSTGRES_PASSWORD:-enterprise}@db:5432/${POSTGRES_DB:-enterprise_api}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+      AUTO_CREATE_TABLES: "false"
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:5173}
+      TRUSTED_HOSTS: ${TRUSTED_HOSTS:-*}
+      RATE_LIMIT_ENABLED: ${RATE_LIMIT_ENABLED:-true}
+      AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-20}
+      PDF_RATE_LIMIT_PER_MINUTE: ${PDF_RATE_LIMIT_PER_MINUTE:-10}
+      PDF_MAX_TASKS: ${PDF_MAX_TASKS:-500}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+      RUN_MIGRATIONS: "true"
+      RUN_SEED: ${RUN_SEED:-false}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=3).status == 200 else 1)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  postgres_data:
